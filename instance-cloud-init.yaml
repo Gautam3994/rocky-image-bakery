@@ -1,0 +1,62 @@
+#cloud-config
+#
+# Per-Instance Cloud-Init — runtime
+#
+# Consumed by cloud-init on every VM cloned from the golden image via
+# a NoCloud seed (or equivalent datasource). Handles only what varies
+# per instance: identity, disk growth, the fluent-bit instance label,
+# and a final health-check gate.
+#
+# Packages, hardening files, firewall rules, and sysctl are already
+# baked into the golden image by Packer — nothing here should invoke
+# dnf.
+#
+# Template variables (envsubst before handing to cloud-init):
+#   HOSTNAME       short hostname
+#   FQDN           fully-qualified domain name
+#   USER_NAME      primary login user to create on this instance
+#   MY_PUBLIC_KEY  authorized SSH public key for USER_NAME
+#   TIMEZONE       e.g. Asia/Kolkata
+#
+# $UPTIME is left unsubstituted — cloud-init fills it in final_message.
+
+manage_etc_hosts: true
+hostname: ${HOSTNAME:-node}
+fqdn: ${FQDN:-node.lab.local}
+
+# ssh-users group already exists in the golden image; only the user
+# itself is instance-specific.
+users:
+  - name: ${USER_NAME}
+    groups: [wheel, ssh-users]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${MY_PUBLIC_KEY}
+
+timezone: ${TIMEZONE:-Asia/Kolkata}
+
+# Grow root partition and filesystem to fill whatever disk the
+# hypervisor presents. Harmless if the disk matches the image size.
+growpart:
+  mode: auto
+  devices: ['/']
+resize_rootfs: true
+
+runcmd:
+  # fluent-bit was baked with instance=unset because the golden image
+  # is shared across all clones. Patch the real hostname in and start
+  # the service for the first time on this instance.
+  - sed -i "s/instance=unset/instance=$(hostname)/" /etc/fluent-bit/fluent-bit.conf
+  - systemctl enable --now fluent-bit
+
+  # Health gate: verify every service the golden image baked in is
+  # still running after clone boot. No package work, no dnf.
+  - systemctl is-active --quiet qemu-guest-agent || exit 1
+  - systemctl is-active --quiet firewalld        || exit 1
+  - systemctl is-active --quiet fail2ban         || exit 1
+  - systemctl is-active --quiet sshd             || exit 1
+  - systemctl is-active --quiet fluent-bit       || exit 1
+
+final_message: "${HOSTNAME} ready after $UPTIME seconds"

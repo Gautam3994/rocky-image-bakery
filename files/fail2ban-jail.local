@@ -1,0 +1,15 @@
+# /etc/fail2ban/jail.local
+# Installed by Packer provisioner from files/fail2ban-jail.local.
+
+[DEFAULT]
+backend   = systemd
+ignoreip  = 127.0.0.1/8 ::1
+
+[sshd]
+enabled   = true
+port      = 22
+filter    = sshd
+maxretry  = 3
+bantime   = 3600
+findtime  = 600
+banaction = firewallcmd-ipset

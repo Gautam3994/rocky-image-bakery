@@ -1,0 +1,11 @@
+[fluent-bit]
+name=Fluent Bit
+# $releasever is a dnf variable — it resolves to 10 on Rocky 10.
+# Verify https://packages.fluentbit.io/rockylinux/10/ exists before
+# your first build; if it 404s, pin to rockylinux/9 or use the
+# official install script from https://docs.fluentbit.io/manual/installation/linux/redhat-centos
+baseurl=https://packages.fluentbit.io/rockylinux/$releasever/
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.fluentbit.io/fluentbit.key
+enabled=1
