@@ -30,6 +30,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Render the build-time NoCloud user-data.
 # envsubst with an explicit variable list so $releasever and other
 # shell variables in the template are NOT expanded here.
+# SC2016 is intentional: envsubst expects a literal variable list.
+# shellcheck disable=SC2016
 envsubst '${BUILD_USER} ${BUILD_PUBLIC_KEY}' \
   < "${SCRIPT_DIR}/nocloud/user-data.tpl" \
   > "${SCRIPT_DIR}/nocloud/user-data"

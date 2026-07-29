@@ -58,5 +58,6 @@ runcmd:
   - systemctl is-active --quiet fail2ban         || exit 1
   - systemctl is-active --quiet sshd             || exit 1
   - systemctl is-active --quiet fluent-bit       || exit 1
+  - systemctl is-active --quiet chronyd          || exit 1
 
 final_message: "${HOSTNAME} ready after $UPTIME seconds"

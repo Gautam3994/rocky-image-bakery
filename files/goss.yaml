@@ -1,0 +1,49 @@
+# files/goss.yaml
+service:
+  qemu-guest-agent:
+    enabled: true
+    running: true
+  firewalld:
+    enabled: true
+    running: true
+  fail2ban:
+    enabled: true
+    running: true
+  sshd:
+    enabled: true
+    running: true
+  chronyd:
+    enabled: true
+    running: true
+  # Note: We don't assert fluent-bit is running here, because your 
+  # golden image logic intentionally leaves it stopped until clone boot.
+
+port:
+  tcp:22:
+    listening: true
+    ip:
+      - 0.0.0.0
+
+file:
+  /etc/ssh/sshd_config.d/99-hardening.conf:
+    exists: true
+    mode: "0644"
+    owner: root
+    group: root
+    contains:
+      - "PermitRootLogin no"
+      - "PasswordAuthentication no"
+      - "AllowGroups ssh-users"
+
+  /etc/fail2ban/jail.local:
+    exists: true
+    mode: "0644"
+
+group:
+  ssh-users:
+    exists: true
+
+command:
+  sshd_config_check:
+    exec: ["sshd", "-t"]
+    exit-status: 0

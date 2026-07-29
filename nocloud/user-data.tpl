@@ -30,7 +30,7 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: true
     ssh_authorized_keys:
-      - ${BUILD_PUBLIC_KEY}
+      - "${BUILD_PUBLIC_KEY}"
 
 disable_root: true
 

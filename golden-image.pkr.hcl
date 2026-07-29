@@ -29,9 +29,9 @@ variable "output_dir" {
   default = "output-golden"
 }
 
-variable "vm_name" {
+variable "vm_name_prefix" {
   type    = string
-  default = "rocky10-golden.qcow2"
+  default = "rocky10-golden"
 }
 
 variable "disk_size" {
@@ -66,6 +66,17 @@ variable "loki_host" {
   description = "Hostname/IP of the Loki instance. Replaces __LOKI_HOST__ in fluent-bit.conf at build time."
   default     = "loki.lab.local"
 }
+
+# ─────────────────────────────────────────────────────────────────
+# Locals
+# ─────────────────────────────────────────────────────────────────
+
+locals {
+  # Strips hyphens, spaces, colons, and the 'Z' from the UTC timestamp
+  # Result: "20260729223045"
+  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+}
+
 # ─────────────────────────────────────────────────────────────────
 # Source
 # ─────────────────────────────────────────────────────────────────
@@ -80,7 +91,7 @@ source "qemu" "rocky10_golden" {
   format           = "qcow2"
   disk_interface   = "virtio"
   output_directory = var.output_dir
-  vm_name          = var.vm_name
+  vm_name          = "${var.vm_name_prefix}-${local.timestamp}.qcow2"
   # Packer resizes the copied source image to disk_size MB.
   # cloud-init growpart + resize_rootfs in nocloud/user-data.tpl
   # fills the partition on first boot so provisioners don't run out
@@ -133,7 +144,9 @@ source "qemu" "rocky10_golden" {
       "sudo userdel -rf ${var.build_user}",
       "sudo rm -f /etc/ssh/ssh_host_*",        # Scrub SSH host keys
       "sudo truncate -s 0 /etc/machine-id",    # Clear machine-id (systemd will regenerate)
+      "sudo rm -f /var/lib/dbus/machine-id",
       "sudo dnf clean all",                    # Save disk space
+      "sudo rm -f /etc/NetworkManager/system-connections/*.nmconnection",
       "sudo shutdown -P now"
   ])
   shutdown_timeout = "5m"
@@ -182,6 +195,8 @@ build {
 
   provisioner "shell" {
     inline = [
+      "sudo dnf install -y dnf-plugins-core",
+      "sudo dnf config-manager --set-enabled crb",
       "sudo dnf install -y epel-release",
       "sudo install -m 644 /tmp/fluent-bit.repo /etc/yum.repos.d/fluent-bit.repo",
       # $releasever resolves to 10 on Rocky 10. If the build 404s here,
@@ -195,9 +210,10 @@ build {
   # ── 3: Packages ───────────────────────────────────────────────
   provisioner "shell" {
     inline = [
-      "sudo dnf install -y qemu-guest-agent tcpdump numactl sysstat iperf3 firewalld ipset fluent-bit",
+      "sudo dnf install -y qemu-guest-agent tcpdump numactl sysstat iperf3 firewalld ipset fluent-bit cloud-utils-growpart",
       # fail2ban and python3-systemd live in EPEL, which is now enabled.
       "sudo dnf install -y fail2ban python3-systemd",
+      "sudo usermod -aG systemd-journal fluent-bit"
     ]
     timeout = "15m"
   }
@@ -212,6 +228,7 @@ build {
       "${path.root}/files/sysctl-hardening.conf",
       "${path.root}/files/fail2ban-jail.local",
       "${path.root}/files/fluent-bit.conf",
+      "${path.root}/files/goss.yaml",
     ]
     destination = "/tmp/"
   }
@@ -222,10 +239,15 @@ build {
       "sudo install -m 644 /tmp/ssh-banner.txt       /etc/ssh/banner.txt",
       "sudo install -m 644 /tmp/sysctl-hardening.conf /etc/sysctl.d/99-hardening.conf",
       "sudo install -m 644 /tmp/fail2ban-jail.local  /etc/fail2ban/jail.local",
+      # Prepare the buffer directory for Fluent Bit
+      "sudo mkdir -p /var/log/fluent-bit/buffers",
       # Substitute Loki host placeholder before the file goes into place.
       # instance=unset is intentional: per-instance cloud-init patches it.
       "sudo sed -i 's|__LOKI_HOST__|${var.loki_host}|g' /tmp/fluent-bit.conf",
       "sudo install -m 644 /tmp/fluent-bit.conf      /etc/fluent-bit/fluent-bit.conf",
+      # --- SELinux Context Restoration ---
+      "echo 'Restoring SELinux file contexts...'",
+      "sudo restorecon -Rv /etc/ssh /etc/sysctl.d /etc/fail2ban /etc/fluent-bit /var/log/fluent-bit"
     ]
   }
 
@@ -250,16 +272,26 @@ build {
     ]
   }
 
-  # ── 6: Validation gate ────────────────────────────────────────
+  # ── 6: Formal Validation Gate (Goss) ──────────────────────────
+# ── 6: Formal Validation Gate (Goss) ──────────────────────────
   provisioner "shell" {
     inline = [
-      "sudo systemctl is-active --quiet qemu-guest-agent || { echo 'FAIL qemu-guest-agent'; exit 1; }",
-      "sudo systemctl is-active --quiet firewalld        || { echo 'FAIL firewalld';        exit 1; }",
-      "sudo systemctl is-active --quiet fail2ban         || { echo 'FAIL fail2ban';         exit 1; }",
-      "sudo systemctl is-active --quiet sshd             || { echo 'FAIL sshd';             exit 1; }",
-      "sudo systemctl is-active --quiet chronyd          || { echo 'FAIL chronyd';          exit 1; }",
-      "sudo sshd -t                                      || { echo 'FAIL sshd config';      exit 1; }",
-      "echo 'All validation checks passed'",
+      "echo 'Downloading Goss for validation...'",
+      # Make sure to replace vX.Y.Z with the specific version for this hash!
+      "curl -sL https://github.com/goss-org/goss/releases/download/vX.Y.Z/goss-linux-amd64 -o /tmp/goss",
+      
+      "echo 'Verifying SHA256 checksum...'",
+      # Hash from GitHub + TWO SPACES + the path where curl saved the file
+      "echo '85d00b7bba5f175bec95de7dfe1f71f8f25204914aad4c6f03c8457868eb6e2f  /tmp/goss' | sha256sum -c -",
+      
+      "echo 'Checksum verified. Setting execute permissions...'",
+      "chmod +rx /tmp/goss",
+      
+      "echo 'Running Goss validation suite...'",
+      "sudo /tmp/goss -g /tmp/goss.yaml validate --format documentation",
+      
+      "echo 'Cleaning up validation artifacts...'",
+      "rm -f /tmp/goss /tmp/goss.yaml"
     ]
   }
 
