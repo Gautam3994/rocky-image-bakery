@@ -2,7 +2,7 @@
 service:
   qemu-guest-agent:
     enabled: true
-    running: true
+    running: false
   firewalld:
     enabled: true
     running: true
@@ -39,11 +39,18 @@ file:
     exists: true
     mode: "0644"
 
+user:
+  fluent-bit:
+    exists: true
+    groups:
+      - systemd-journal
+      - fluent-bit
+
 group:
   ssh-users:
     exists: true
 
 command:
   sshd_config_check:
-    exec: ["sshd", "-t"]
+    exec: "sshd -t"
     exit-status: 0

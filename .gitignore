@@ -1,1 +1,4 @@
 nocloud/user-data
+serial-boot.log
+output-golden/rocky10-golden-20260730150611.qcow2
+output-golden/sha256.checksum

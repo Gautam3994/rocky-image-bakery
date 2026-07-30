@@ -1,4 +1,5 @@
 #cloud-config
+output: {all: '| tee -a /var/log/cloud-init-output.log /dev/console'}
 #
 # Build-time NoCloud seed — consumed ONCE by cloud-init inside the
 # Packer build VM.
@@ -27,10 +28,10 @@ users:
   - name: ${BUILD_USER}
     groups: [wheel, ssh-users]
     shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
     lock_passwd: true
     ssh_authorized_keys:
-      - "${BUILD_PUBLIC_KEY}"
+      - ${BUILD_PUBLIC_KEY}
 
 disable_root: true
 

@@ -127,10 +127,19 @@ source "qemu" "rocky10_golden" {
   # ── Boot ──────────────────────────────────────────────────────
   # GenericCloud images boot directly; no boot_command needed.
   # 20 s gives QEMU time to start before we begin polling SSH.
+
+  boot_command = [
+    "<up><wait><tab><wait>",
+    " inst.text inst.ks=cdrom:/ks.cfg ",
+    " console=ttyS0 ",                   # <-- ADD THIS
+    "<enter><wait>"
+  ]
+
   boot_wait = "20s"
 
   qemuargs = [
     ["-machine", "type=q35,accel=kvm"],
+    ["-serial", "file:serial-boot.log"],
     ["-cpu", "host"],
   ]
 
@@ -139,16 +148,19 @@ source "qemu" "rocky10_golden" {
   #    on every VM cloned from this image.
   # 2. Remove the ephemeral build user (fails-fast if already gone).
   # 3. Power off.
-  shutdown_command = join(" && ", [
+  shutdown_command = join(" ; ", [
       "sudo cloud-init clean --logs",
-      "sudo userdel -rf ${var.build_user}",
-      "sudo rm -f /etc/ssh/ssh_host_*",        # Scrub SSH host keys
-      "sudo truncate -s 0 /etc/machine-id",    # Clear machine-id (systemd will regenerate)
-      "sudo rm -f /var/lib/dbus/machine-id",
-      "sudo dnf clean all",                    # Save disk space
+      "sudo rm -f /etc/ssh/ssh_host_*",                                  # Scrub SSH host keys
+      "sudo truncate -s 0 /etc/machine-id",                              # Clear machine-id (systemd will regenerate)
+      "sudo dnf clean all",                                              # Save disk space
       "sudo rm -f /etc/NetworkManager/system-connections/*.nmconnection",
+      "sudo passwd -l packer",                                           # Lock the provisioner account password
+      "sudo usermod -s /sbin/nologin packer",                            # Prevent shell access for the provisioner account
+      "rm -f ~/.ssh/authorized_keys ~/.bash_history",                    # Scrub SSH keys and bash history
+      "history -c",                                                      # Clear current session history
       "sudo shutdown -P now"
   ])
+  
   shutdown_timeout = "5m"
 }
 
@@ -160,16 +172,20 @@ build {
   name    = "rocky10-golden"
   sources = ["source.qemu.rocky10_golden"]
 
+  provisioner "file" {
+    source      = "${path.root}/files/check-cloud-init.py"
+    destination = "/tmp/check-cloud-init.py"
+  }
+
   # ── 0: Wait for build-time cloud-init ─────────────────────────
   # The NoCloud seed only creates the build user; block until it
   # finishes so the system is stable before provisioners touch it.
   provisioner "shell" {
     inline = [
-      "sudo cloud-init status --wait",
-      "echo 'cloud-init seed complete'",
+      "until cloud-init status 2>/dev/null | grep -qE 'status: (done|error|degraded)'; do sleep 2; done",
+      "python3 /tmp/check-cloud-init.py",
     ]
   }
-
   # ── 1: System update ──────────────────────────────────────────
   # Always reboot after update so the running kernel matches the
   # installed packages. expect_disconnect tells Packer to wait for
@@ -198,12 +214,13 @@ build {
       "sudo dnf install -y dnf-plugins-core",
       "sudo dnf config-manager --set-enabled crb",
       "sudo dnf install -y epel-release",
+      "sudo rpm --import https://packages.fluentbit.io/fluentbit.key",
       "sudo install -m 644 /tmp/fluent-bit.repo /etc/yum.repos.d/fluent-bit.repo",
       # $releasever resolves to 10 on Rocky 10. If the build 404s here,
       # the rockylinux/10 path hasn't been published yet on
       # packages.fluentbit.io; fall back to rockylinux/9 or use their
       # install script.
-      "sudo dnf makecache",
+      "sudo dnf makecache --assumeyes",
     ]
   }
 
@@ -213,6 +230,9 @@ build {
       "sudo dnf install -y qemu-guest-agent tcpdump numactl sysstat iperf3 firewalld ipset fluent-bit cloud-utils-growpart",
       # fail2ban and python3-systemd live in EPEL, which is now enabled.
       "sudo dnf install -y fail2ban python3-systemd",
+      "rpm -qi fluent-bit || echo 'fluent-bit not installed'",
+      # FIX: Defensively assert the user exists before modifying
+      "sudo getent passwd fluent-bit || sudo useradd --system --no-create-home --shell /sbin/nologin fluent-bit",
       "sudo usermod -aG systemd-journal fluent-bit"
     ]
     timeout = "15m"
@@ -254,7 +274,7 @@ build {
   # ── 5: Services, firewall, sysctl ─────────────────────────────
   provisioner "shell" {
     inline = [
-      "sudo systemctl enable --now qemu-guest-agent",
+      "sudo systemctl enable qemu-guest-agent",
       "sudo systemctl enable --now firewalld",
       "sudo systemctl enable --now fail2ban",
       "sudo systemctl enable --now chronyd",
@@ -273,32 +293,30 @@ build {
   }
 
   # ── 6: Formal Validation Gate (Goss) ──────────────────────────
-# ── 6: Formal Validation Gate (Goss) ──────────────────────────
   provisioner "shell" {
     inline = [
       "echo 'Downloading Goss for validation...'",
-      # Make sure to replace vX.Y.Z with the specific version for this hash!
-      "curl -sL https://github.com/goss-org/goss/releases/download/vX.Y.Z/goss-linux-amd64 -o /tmp/goss",
+      "curl -sL https://github.com/goss-org/goss/releases/download/v0.4.10/goss_0.4.10_linux_x86_64.tar.gz -o /tmp/goss.tar.gz",
       
       "echo 'Verifying SHA256 checksum...'",
-      # Hash from GitHub + TWO SPACES + the path where curl saved the file
-      "echo '85d00b7bba5f175bec95de7dfe1f71f8f25204914aad4c6f03c8457868eb6e2f  /tmp/goss' | sha256sum -c -",
+      "echo '26e365428946294bcec0c61d867bb3c8349f39feb3d0e6f59084e98632785cc7  /tmp/goss.tar.gz' | sha256sum -c -",
       
-      "echo 'Checksum verified. Setting execute permissions...'",
+      "echo 'Extracting and setting permissions...'",
+      "tar -xzf /tmp/goss.tar.gz -C /tmp goss",
       "chmod +rx /tmp/goss",
       
       "echo 'Running Goss validation suite...'",
       "sudo /tmp/goss -g /tmp/goss.yaml validate --format documentation",
       
       "echo 'Cleaning up validation artifacts...'",
-      "rm -f /tmp/goss /tmp/goss.yaml"
+      "rm -f /tmp/goss /tmp/goss.tar.gz /tmp/goss.yaml"
     ]
   }
 
   # Optional: generate a SHA256 checksum alongside the image.
   # Uncomment to enable.
-  # post-processor "checksum" {
-  #   checksum_types = ["sha256"]
-  #   output         = "${var.output_dir}/{{.ChecksumType}}.checksum"
-  # }
+  post-processor "checksum" {
+    checksum_types = ["sha256"]
+    output         = "${var.output_dir}/{{.ChecksumType}}.checksum"
+  }
 }
