@@ -217,10 +217,6 @@ build {
       "sudo dnf install -y epel-release",
       "sudo rpm --import https://packages.fluentbit.io/fluentbit.key",
       "sudo install -m 644 /tmp/fluent-bit.repo /etc/yum.repos.d/fluent-bit.repo",
-      # $releasever resolves to 10 on Rocky 10. If the build 404s here,
-      # the rockylinux/10 path hasn't been published yet on
-      # packages.fluentbit.io; fall back to rockylinux/9 or use their
-      # install script.
       "sudo dnf makecache --assumeyes",
     ]
   }
