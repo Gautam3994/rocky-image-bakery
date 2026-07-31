@@ -325,7 +325,7 @@ build {
       "cd ${var.output_dir} && sha256sum optimized-${local.image_name} > optimized-${local.image_name}.sha256",
       
       "echo 'Cleaning up unoptimized original...'",
-      "rm -f ${var.output_dir}/${local.image_name}"
+      "rm -f ${local.image_name}"
     ]
   }
 }
