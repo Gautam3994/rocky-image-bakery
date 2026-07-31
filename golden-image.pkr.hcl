@@ -132,7 +132,7 @@ source "qemu" "rocky10_golden" {
   boot_command = [
     "<up><wait><tab><wait>",
     " inst.text inst.ks=cdrom:/ks.cfg ",
-    " console=ttyS0 ",                   # <-- ADD THIS
+    " console=ttyS0 ",                  
     "<enter><wait>"
   ]
 
@@ -141,7 +141,7 @@ source "qemu" "rocky10_golden" {
   qemuargs = [
     ["-machine", "type=q35,accel=kvm"],
     ["-serial", "file:serial-boot.log"],
-    ["-cpu", "host"],
+    ["-cpu", "host"], # <-- Ties the image build to hardware compatible with host cpu -->
   ]
 
   # ── Shutdown ───────────────────────────────────────────────────
