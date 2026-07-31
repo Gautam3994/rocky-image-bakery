@@ -22,10 +22,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-: "${BUILD_USER:=packer}"
+export BUILD_USER="${BUILD_USER:-packer}"
 : "${BUILD_PUBLIC_KEY:?BUILD_PUBLIC_KEY must be set}"
 : "${BUILD_PRIVATE_KEY_FILE:?BUILD_PRIVATE_KEY_FILE must be set}"
-: "${LOKI_HOST:=loki.lab.local}"
+export LOKI_HOST="${LOKI_HOST:-loki.lab.local}"
 
 # Render the build-time NoCloud user-data.
 # envsubst with an explicit variable list so $releasever and other

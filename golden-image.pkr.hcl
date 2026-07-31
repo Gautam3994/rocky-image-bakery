@@ -75,6 +75,7 @@ locals {
   # Strips hyphens, spaces, colons, and the 'Z' from the UTC timestamp
   # Result: "20260729223045"
   timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  image_name = "${var.vm_name_prefix}-${local.timestamp}.qcow2"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ source "qemu" "rocky10_golden" {
   format           = "qcow2"
   disk_interface   = "virtio"
   output_directory = var.output_dir
-  vm_name          = "${var.vm_name_prefix}-${local.timestamp}.qcow2"
+  vm_name          = local.image_name
   # Packer resizes the copied source image to disk_size MB.
   # cloud-init growpart + resize_rootfs in nocloud/user-data.tpl
   # fills the partition on first boot so provisioners don't run out
@@ -313,10 +314,18 @@ build {
     ]
   }
 
-  # Optional: generate a SHA256 checksum alongside the image.
-  # Uncomment to enable.
-  post-processor "checksum" {
-    checksum_types = ["sha256"]
-    output         = "${var.output_dir}/{{.ChecksumType}}.checksum"
+  # We combine the optimization and checksum generation into a single 
+  # step to ensure the hash matches the final compressed artifact.
+  post-processor "shell-local" {
+    inline = [
+      "echo 'Compressing QCOW2 image...'",
+      "qemu-img convert -p -O qcow2 -c ${var.output_dir}/${local.image_name} ${var.output_dir}/optimized-${local.image_name}",
+      
+      "echo 'Generating SHA256 checksum for optimized image...'",
+      "cd ${var.output_dir} && sha256sum optimized-${local.image_name} > optimized-${local.image_name}.sha256",
+      
+      "echo 'Cleaning up unoptimized original...'",
+      "rm -f ${var.output_dir}/${local.image_name}"
+    ]
   }
 }

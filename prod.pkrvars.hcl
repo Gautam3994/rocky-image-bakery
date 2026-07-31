@@ -11,3 +11,4 @@ disk_size       = 20480 # MB → 20 GB
 memory          = 2048
 cpus            = 2
 loki_host       = "loki.lab.local"
+build_user      = "packer"
