@@ -18,6 +18,12 @@ service:
   # Note: We don't assert fluent-bit is running here, because your 
   # golden image logic intentionally leaves it stopped until clone boot.
 
+package:
+  ipset:
+    installed: true
+  fail2ban-firewalld:
+    installed: true
+
 port:
   tcp:22:
     listening: true
@@ -30,14 +36,18 @@ file:
     mode: "0644"
     owner: root
     group: root
-    contains:
-      - "PermitRootLogin no"
+    contents:
+      - "PermitRootLogin no" # All these are just substring checks
       - "PasswordAuthentication no"
       - "AllowGroups ssh-users"
 
   /etc/fail2ban/jail.local:
     exists: true
     mode: "0644"
+    contents:
+      - "banaction = firewallcmd-ipset"
+      - "bantime.increment = true"
+      - "maxretry"
 
 user:
   fluent-bit:
@@ -53,4 +63,16 @@ group:
 command:
   sshd_config_check:
     exec: "sshd -t"
+    exit-status: 0
+  
+  chrony_synced:
+    exec: "chronyc waitsync 30 0.5 0 0"
+    exit-status: 0
+  
+  firewalld_ssh_allowed:
+    exec: "firewall-cmd --query-service=ssh"
+    exit-status: 0
+  
+  sshd_effective_config:
+    exec: "sshd -T | grep -i '^permitrootlogin no'"
     exit-status: 0

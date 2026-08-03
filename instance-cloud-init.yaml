@@ -24,12 +24,20 @@ manage_etc_hosts: true
 hostname: ${HOSTNAME:-node}
 fqdn: ${FQDN:-node.lab.local}
 
+# Hardening: Explicitly ensure the root account is locked and cannot be accessed via SSH
+disable_root: true
+
 # ssh-users group already exists in the golden image; only the user
 # itself is instance-specific.
 users:
   - name: ${USER_NAME}
     groups: [wheel, ssh-users]
     shell: /bin/bash
+    # HARDENING NOTE: Because 'lock_passwd' is true (meaning no password exists), 
+    # NOPASSWD is required here to use sudo. However, this means the PAM faillock/pwquality 
+    # hardening we added earlier will not apply to this specific user. 
+    # To enforce PAM sudo protections in production, change this to 'ALL=(ALL) ALL' 
+    # and provision a password hash via a secure pipeline.
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: true
     ssh_authorized_keys:
@@ -45,6 +53,10 @@ growpart:
 resize_rootfs: true
 
 runcmd:
+  # Hardening: Completely eradicate the temporary packer user and its home directory
+  # The '|| true' ensures cloud-init doesn't fail if the user was already removed
+  - userdel -r packer || true
+
   # fluent-bit was baked with instance=unset because the golden image
   # is shared across all clones. Patch the real hostname in and start
   # the service for the first time on this instance.

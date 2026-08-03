@@ -246,6 +246,9 @@ build {
       "${path.root}/files/fail2ban-jail.local",
       "${path.root}/files/fluent-bit.conf",
       "${path.root}/files/goss.yaml",
+      "${path.root}/files/pwquality.conf",
+      "${path.root}/files/faillock.conf",
+      "${path.root}/files/limits-hardening.conf",
     ]
     destination = "/tmp/"
   }
@@ -262,9 +265,14 @@ build {
       # instance=unset is intentional: per-instance cloud-init patches it.
       "sudo sed -i 's|__LOKI_HOST__|${var.loki_host}|g' /tmp/fluent-bit.conf",
       "sudo install -m 644 /tmp/fluent-bit.conf      /etc/fluent-bit/fluent-bit.conf",
+      "sudo install -m 644 /tmp/pwquality.conf       /etc/security/pwquality.conf",
+      "sudo install -m 644 /tmp/faillock.conf         /etc/security/faillock.conf",
+      "sudo install -m 644 /tmp/limits-hardening.conf /etc/security/limits.d/99-hardening.conf",
+      # Enable faillock and pwhistory in the PAM stack via authselect.
+      "sudo authselect select sssd with-faillock with-pwhistory --force",
       # --- SELinux Context Restoration ---
       "echo 'Restoring SELinux file contexts...'",
-      "sudo restorecon -Rv /etc/ssh /etc/sysctl.d /etc/fail2ban /etc/fluent-bit /var/log/fluent-bit"
+      "sudo restorecon -Rv /etc/ssh /etc/sysctl.d /etc/fail2ban /etc/fluent-bit /var/log/fluent-bit /etc/security /etc/security/limits.d"
     ]
   }
 
@@ -283,6 +291,8 @@ build {
       "sudo firewall-cmd --reload",
       "sudo firewall-cmd --query-service=ssh",
       "sudo sysctl --system",
+      "sudo fail2ban-client status sshd",
+      "sudo fail2ban-client get sshd bantime"
       # fluent-bit is intentionally NOT started here.
       # Its config still has instance=unset; per-instance cloud-init
       # patches that label and starts the service on first clone boot.
