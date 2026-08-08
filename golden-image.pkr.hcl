@@ -26,7 +26,14 @@ variable "source_checksum" {
 
 variable "output_dir" {
   type    = string
+  description = "Scratch build directory. Treat as EPHEMERAL — safe to delete between Packer runs. The final artifact is published to libvirt_image_dir, not left here."
   default = "output-golden"
+}
+
+variable "libvirt_image_dir" {
+  type        = string
+  description = "Stable publish location for the final optimized image, used as the backing file for CoW instance overlays. Defaults to libvirt's standard image store, which sits inside libvirt's default AppArmor trust boundary on Debian/Ubuntu hosts — no manual profile edits needed to let qemu read it."
+  default     = "/var/lib/libvirt/images"
 }
 
 variable "vm_name_prefix" {
@@ -76,6 +83,9 @@ locals {
   # Result: "20260729223045"
   timestamp = regex_replace(timestamp(), "[- TZ:]", "")
   image_name = "${var.vm_name_prefix}-${local.timestamp}.qcow2"
+  # Name as it exists after the compression step, and as it will be
+  # published under libvirt_image_dir.
+  optimized_name = "optimized-${local.image_name}"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -328,10 +338,28 @@ build {
       "qemu-img convert -p -O qcow2 -c ${var.output_dir}/${local.image_name} ${var.output_dir}/optimized-${local.image_name}",
       
       "echo 'Generating SHA256 checksum for optimized image...'",
-      "cd ${var.output_dir} && sha256sum optimized-${local.image_name} > optimized-${local.image_name}.sha256",
+      "cd ${var.output_dir} && sha256sum optimized-${local.image_name} > optimized-${local.image_name}.sha256; cd ..",
       
       "echo 'Cleaning up unoptimized original...'",
-      "rm -f ${local.image_name}"
+      "rm -f ${var.output_dir}/${local.image_name}",
+
+      "echo 'Publishing golden image to ${var.libvirt_image_dir} (stable path, survives output_dir cleanup)...'",
+      "sudo mkdir -p ${var.libvirt_image_dir}",
+      "sudo mv ${var.output_dir}/${local.optimized_name} ${var.libvirt_image_dir}/${local.optimized_name}",
+      "sudo mv ${var.output_dir}/${local.optimized_name}.sha256 ${var.libvirt_image_dir}/${local.optimized_name}.sha256",
+      
+      # world-readable is enough for qemu to open it as a backing file —
+      # no need to guess/chown to a specific qemu process user, and the
+      # host is Ubuntu (AppArmor) so no restorecon is needed here.
+      "sudo chmod 644 ${var.libvirt_image_dir}/${local.optimized_name}",
+      "sudo chmod 644 ${var.libvirt_image_dir}/${local.optimized_name}.sha256",
+
+      "echo 'Updating rocky10-golden-latest.qcow2 symlink atomically...'",
+      "sudo ln -sfn ${var.libvirt_image_dir}/${local.optimized_name} ${var.libvirt_image_dir}/rocky10-golden-latest.qcow2.tmp",
+      "sudo mv -T ${var.libvirt_image_dir}/rocky10-golden-latest.qcow2.tmp ${var.libvirt_image_dir}/rocky10-golden-latest.qcow2",
+
+      "echo 'Published: ${var.libvirt_image_dir}/rocky10-golden-latest.qcow2 -> ${local.optimized_name}'",
+      "echo 'NOTE: previous timestamped images in ${var.libvirt_image_dir} are left in place — do not delete one that a running instance overlay still depends on. Check with: qemu-img info <instance>.qcow2 | grep backing'"
     ]
   }
 }

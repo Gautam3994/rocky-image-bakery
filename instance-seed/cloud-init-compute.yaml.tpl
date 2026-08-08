@@ -12,8 +12,8 @@
 # dnf.
 #
 # Template variables (envsubst before handing to cloud-init):
-#   HOSTNAME       short hostname
-#   FQDN           fully-qualified domain name
+#   VM_HOSTNAME    short hostname (NOT $HOSTNAME — that's a bash special var)
+#   VM_FQDN        fully-qualified domain name
 #   USER_NAME      primary login user to create on this instance
 #   MY_PUBLIC_KEY  authorized SSH public key for USER_NAME
 #   TIMEZONE       e.g. Asia/Kolkata
@@ -21,8 +21,8 @@
 # $UPTIME is left unsubstituted — cloud-init fills it in final_message.
 
 manage_etc_hosts: true
-hostname: ${HOSTNAME:-node}
-fqdn: ${FQDN:-node.lab.local}
+hostname: ${VM_HOSTNAME}
+fqdn: ${VM_FQDN}
 
 # Hardening: Explicitly ensure the root account is locked and cannot be accessed via SSH
 disable_root: true
@@ -43,7 +43,7 @@ users:
     ssh_authorized_keys:
       - ${MY_PUBLIC_KEY}
 
-timezone: ${TIMEZONE:-Asia/Kolkata}
+timezone: ${TIMEZONE}
 
 # Grow root partition and filesystem to fill whatever disk the
 # hypervisor presents. Harmless if the disk matches the image size.
@@ -72,4 +72,4 @@ runcmd:
   - systemctl is-active --quiet fluent-bit       || exit 1
   - systemctl is-active --quiet chronyd          || exit 1
 
-final_message: "${HOSTNAME} ready after $UPTIME seconds"
+final_message: "${VM_HOSTNAME} ready after $UPTIME seconds"

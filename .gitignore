@@ -1,3 +1,4 @@
 nocloud/user-data
 serial-boot.log
 output-golden/
+instance-seed/
